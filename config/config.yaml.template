@@ -1,0 +1,49 @@
+# BKK API Configuration
+bkk_api:
+  base_url: "https://futar.bkk.hu/api/query/v1/ws/otp/api/where"
+  api_key: "YOUR_BKK_API_KEY_HERE"
+  version: "4"
+  dialect: "otp"
+
+# Budapest area configuration
+budapest:
+  lat: 47.4973
+  lon: 19.0408
+  radius: 20000  # meters - covers all of Budapest
+
+# Collection intervals (in minutes)
+collection_intervals:
+  # Monday-Thursday working hours (9:00-17:00)
+  weekday_working_hours: 15  # 15 minutes during working hours
+
+  # Monday-Thursday non-working hours
+  weekday_non_working_hours: 5  # 5 minutes outside working hours
+
+  # Friday-Sunday all day
+  weekend: 5  # 5 minutes on weekends
+
+# Working hours definition
+working_hours:
+  start: 9   # 9:00 AM
+  end: 17    # 5:00 PM
+
+# Days considered as weekend (0=Monday, 6=Sunday)
+weekend_days: [4, 5, 6]  # Friday, Saturday, Sunday
+
+# Data storage
+storage:
+  base_path: "data/raw/bkk"
+  compress_old_files: false  # Set to true if you want to compress older files
+
+# Logging
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+  file: "logs/collector.log"
+  max_size_mb: 100
+  backup_count: 5
+
+# Retry configuration for API failures
+retry:
+  max_attempts: 3
+  initial_delay_seconds: 5
+  backoff_factor: 2  # Exponential backoff

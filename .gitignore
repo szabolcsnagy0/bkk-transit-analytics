@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv
+*.egg-info/
+dist/
+build/
+
+# Data files
+data/
+
+# Logs
+logs/
+
+# Config with sensitive data
+config/config.yaml
+
+# Keep the template
+!config/config.yaml.template
+
+# OS
+.DS_Store
