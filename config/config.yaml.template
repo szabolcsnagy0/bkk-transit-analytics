@@ -47,3 +47,7 @@ retry:
   max_attempts: 3
   initial_delay_seconds: 5
   backoff_factor: 2  # Exponential backoff
+
+# Weather API Configuration
+weather_api:
+  api_key: "YOUR_OPENWEATHER_API_KEY"  # Replace with your actual API key
