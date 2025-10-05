@@ -208,6 +208,7 @@ class BKKCollector:
         self.logger.info("Starting continuous BKK data collection")
         self.logger.info(f"Configuration loaded from: config/config.yaml")
 
+        from datetime import timedelta
         while True:
             try:
                 # Check for too many consecutive failures
@@ -230,13 +231,8 @@ class BKKCollector:
                                    f"{stats['days_collected']} days")
 
                 # Wait for next collection
-                next_collection = datetime.now().replace(second=0, microsecond=0)
-                next_collection = next_collection.replace(
-                    minute=(next_collection.minute // interval_minutes + 1) * interval_minutes % 60
-                )
-                if next_collection.minute == 0:
-                    next_collection = next_collection.replace(hour=(next_collection.hour + 1) % 24)
-
+                now = datetime.now()
+                next_collection = now.replace(second=0, microsecond=0) + timedelta(minutes=interval_minutes)
                 wait_seconds = (next_collection - datetime.now()).total_seconds()
                 if wait_seconds > 0:
                     self.logger.info(f"Next collection at {next_collection.strftime('%H:%M:%S')} "
