@@ -328,89 +328,28 @@ class UnifiedWeatherCollector:
         if self.failed_count > 0:
             self.logger.warning("Some weather data could not be collected (API rate limits, missing data, or network issues)")
 
-    def calculate_next_sync_time(self):
-        """Calculate next sync time (9:00 or 21:00)"""
-        now = datetime.now()
-        today_9am = now.replace(hour=9, minute=0, second=0, microsecond=0)
-        today_9pm = now.replace(hour=21, minute=0, second=0, microsecond=0)
-
-        if now < today_9am:
-            return today_9am
-        elif now < today_9pm:
-            return today_9pm
-        else:
-            # Next sync is tomorrow at 9am
-            tomorrow = now + timedelta(days=1)
-            return tomorrow.replace(hour=9, minute=0, second=0, microsecond=0)
-
-    def run_continuous(self, days_back: int = 2):
-        """Run continuous sync twice daily at 9:00 and 21:00"""
-        self.logger.info("Starting continuous weather collection")
-        self.logger.info("Will sync weather data twice daily at 9:00 and 21:00")
-        self.logger.info(f"Looking back {days_back} days for each sync")
-
-        while True:
-            try:
-                # Calculate next sync time
-                next_sync = self.calculate_next_sync_time()
-                wait_seconds = (next_sync - datetime.now()).total_seconds()
-
-                if wait_seconds > 0:
-                    self.logger.info(f"Next sync scheduled for {next_sync.strftime('%Y-%m-%d %H:%M')} "
-                                   f"(waiting {int(wait_seconds)} seconds)")
-                    time.sleep(wait_seconds)
-
-                # Run the sync
-                self.logger.info(f"Starting scheduled sync at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-
-                # Reset counters for this run
-                self.reset_counters()
-
-                # Run sync
-                self.collect_weather(days_back=days_back, mode_name="Scheduled Sync")
-
-                # Small delay to avoid immediate re-trigger
-                time.sleep(60)
-
-            except KeyboardInterrupt:
-                self.logger.info("Weather collector stopped by user")
-                break
-            except Exception as e:
-                self.logger.error(f"Error in sync loop: {e}")
-                self.logger.info("Waiting 5 minutes before retry...")
-                time.sleep(300)
-
-    def reset_counters(self):
-        """Reset all counters and cache for a new run"""
-        self.collected_count = 0
-        self.skipped_count = 0
-        self.failed_count = 0
-        self.weather_cache = {}
 
 
 def main():
     """Main entry point"""
     parser = argparse.ArgumentParser(
-        description='Unified Weather Data Collector for BKK transit data',
+        description='Weather Data Collector for BKK transit data',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
   # Collect all historical weather data
-  python weather_collector_unified.py --all
+  python src/weather_collector.py --all
 
-  # Collect recent data (last 2 days)
-  python weather_collector_unified.py --recent
+  # Collect recent data (last 2 days, default)
+  python src/weather_collector.py --recent
 
   # Collect with custom days back
-  python weather_collector_unified.py --recent --days-back 5
-
-  # Run continuous mode (default - syncs at 9:00 and 21:00)
-  python weather_collector_unified.py
+  python src/weather_collector.py --recent --days-back 5
         """
     )
 
-    # Mode selection
-    mode_group = parser.add_mutually_exclusive_group()
+    # Mode selection (required)
+    mode_group = parser.add_mutually_exclusive_group(required=True)
     mode_group.add_argument('--all', action='store_true',
                            help='Collect weather for all BKK data')
     mode_group.add_argument('--recent', action='store_true',
@@ -418,7 +357,7 @@ Examples:
 
     # Options
     parser.add_argument('--days-back', type=int, default=2,
-                       help='Number of days to look back (default: 2, used with --recent or continuous mode)')
+                       help='Number of days to look back (default: 2, used with --recent)')
 
     args = parser.parse_args()
 
@@ -428,16 +367,14 @@ Examples:
         if args.all:
             # Full collection mode
             collector.collect_weather(days_back=None, mode_name="Full Collection")
-        elif args.recent:
+        else:
             # Recent collection mode
             collector.collect_weather(days_back=args.days_back, mode_name="Recent Collection")
-        else:
-            # Continuous mode (default)
-            collector.run_continuous(args.days_back)
 
     except KeyboardInterrupt:
         collector.logger.info("Collection interrupted by user")
         collector.logger.info(f"Total collected: {collector.collected_count} files")
+        sys.exit(1)
     except Exception as e:
         print(f"Unexpected error: {e}")
         sys.exit(1)

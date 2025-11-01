@@ -5,6 +5,7 @@ BKK Data Collector - Simple and clean implementation for collecting real-time tr
 
 import json
 import requests
+import sys
 import time
 import os
 import logging
@@ -185,7 +186,7 @@ class BKKCollector:
             'days_collected': len(list(storage_path.iterdir()))
         }
 
-    def run_once(self):
+    def run(self):
         """Run a single collection cycle"""
         self.logger.info("Starting collection cycle...")
 
@@ -201,56 +202,51 @@ class BKKCollector:
                 vehicle_count = len(data['data'].get('list', []))
                 self.logger.info(f"Collected data for {vehicle_count} vehicles")
 
+            # Log stats
+            stats = self.get_collection_stats()
+            if stats:
+                self.logger.info(f"Collection stats: {stats['total_files']} files, "
+                               f"{stats['total_size_mb']} MB, "
+                               f"{stats['days_collected']} days")
+
         return saved_file is not None
-
-    def run_continuous(self):
-        """Run continuous collection with dynamic intervals"""
-        self.logger.info("Starting continuous BKK data collection")
-        self.logger.info(f"Configuration loaded from: config/config.yaml")
-
-        from datetime import timedelta
-        while True:
-            try:
-                # Check for too many consecutive failures
-                if self.consecutive_failures >= self.max_consecutive_failures:
-                    self.logger.error(f"Too many consecutive failures ({self.consecutive_failures}). Stopping collector.")
-                    self.logger.error("Please check your API key and network connection.")
-                    break
-
-                # Run collection
-                success = self.run_once()
-
-                # Get current interval
-                interval_minutes = self.get_current_interval()
-
-                # Log stats periodically
-                stats = self.get_collection_stats()
-                if stats:
-                    self.logger.info(f"Collection stats: {stats['total_files']} files, "
-                                   f"{stats['total_size_mb']} MB, "
-                                   f"{stats['days_collected']} days")
-
-                # Wait for next collection
-                now = datetime.now()
-                next_collection = now.replace(second=0, microsecond=0) + timedelta(minutes=interval_minutes)
-                wait_seconds = (next_collection - datetime.now()).total_seconds()
-                if wait_seconds > 0:
-                    self.logger.info(f"Next collection at {next_collection.strftime('%H:%M:%S')} "
-                                   f"(waiting {int(wait_seconds)} seconds, interval: {interval_minutes} min)")
-                    time.sleep(wait_seconds)
-
-            except KeyboardInterrupt:
-                self.logger.info("Collection stopped by user")
-                break
-            except Exception as e:
-                self.logger.error(f"Unexpected error in collection loop: {e}")
-                time.sleep(60)  # Wait a minute before retrying
 
 
 def main():
     """Main entry point"""
-    collector = BKKCollector()
-    collector.run_continuous()
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description='BKK Data Collector - Collect real-time transit data',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Run a single collection
+  python src/bkk_collector.py
+
+  # Run with custom config
+  python src/bkk_collector.py --config config/custom.yaml
+        """
+    )
+
+    parser.add_argument('--config', default='config/config.yaml',
+                       help='Path to configuration file (default: config/config.yaml)')
+
+    args = parser.parse_args()
+
+    try:
+        collector = BKKCollector(config_path=args.config)
+        success = collector.run()
+
+        if not success:
+            sys.exit(1)
+
+    except KeyboardInterrupt:
+        print("\nCollection interrupted by user")
+        sys.exit(1)
+    except Exception as e:
+        print(f"Unexpected error: {e}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

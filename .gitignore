@@ -25,3 +25,5 @@ config/config.yaml
 
 # OS
 .DS_Store
+
+scripts/crontab.txt

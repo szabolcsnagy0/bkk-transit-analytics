@@ -1,9 +1,17 @@
+# Python Environment Configuration
+python:
+  # Path to Python interpreter with required packages installed
+  # Examples:
+  # - pyenv: /Users/USERNAME/.pyenv/versions/VERSION/envs/ENV_NAME/bin/python
+  # - system: /usr/bin/python3
+  # - venv: /path/to/venv/bin/python
+  interpreter_path: "/usr/bin/python3"  # UPDATE THIS PATH
+
 # BKK API Configuration
 bkk_api:
   base_url: "https://futar.bkk.hu/api/query/v1/ws/otp/api/where"
   api_key: "YOUR_BKK_API_KEY_HERE"
   version: "4"
-  dialect: "otp"
 
 # Budapest area configuration
 budapest:
@@ -12,15 +20,11 @@ budapest:
   radius: 20000  # meters - covers all of Budapest
 
 # Collection intervals (in minutes)
+# Note: These match the crontab schedule in scripts/crontab.txt
 collection_intervals:
-  # Monday-Thursday working hours (9:00-17:00)
-  weekday_working_hours: 15  # 15 minutes during working hours
-
-  # Monday-Thursday non-working hours
-  weekday_non_working_hours: 5  # 5 minutes outside working hours
-
-  # Friday-Sunday all day
-  weekend: 5  # 5 minutes on weekends
+  weekday_working_hours: 15  # Monday-Thursday 9:00-17:00
+  weekday_non_working_hours: 5  # Monday-Thursday outside working hours
+  weekend: 5  # Friday-Sunday all day
 
 # Working hours definition
 working_hours:
@@ -33,7 +37,6 @@ weekend_days: [4, 5, 6]  # Friday, Saturday, Sunday
 # Data storage
 storage:
   base_path: "data/raw/bkk"
-  compress_old_files: false  # Set to true if you want to compress older files
 
 # Logging
 logging:
