@@ -14,5 +14,23 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./sql:/docker-entrypoint-initdb.d
 
+  metabase:
+    image: metabase/metabase:latest
+    container_name: bkk_metabase
+    ports:
+      - "3000:3000"
+    environment:
+      MB_DB_TYPE: postgres
+      MB_DB_DBNAME: ${POSTGRES_DB}
+      MB_DB_PORT: 5432
+      MB_DB_USER: ${POSTGRES_USER}
+      MB_DB_PASS: ${POSTGRES_PASSWORD}
+      MB_DB_HOST: db
+    depends_on:
+      - db
+    volumes:
+      - metabase_data:/metabase-data
+
 volumes:
   postgres_data:
+  metabase_data:
