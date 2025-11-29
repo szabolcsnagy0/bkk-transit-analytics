@@ -122,10 +122,7 @@ CREATE TABLE IF NOT EXISTS dwh.dim_weather (
 CREATE TABLE IF NOT EXISTS dwh.dim_route (
     route_id TEXT PRIMARY KEY,
     short_name TEXT,
-    long_name TEXT,
-    type INTEGER,
-    color TEXT,
-    text_color TEXT
+    type TEXT
 );
 
 -- Stop Dimension
@@ -134,7 +131,16 @@ CREATE TABLE IF NOT EXISTS dwh.dim_stop (
     name TEXT,
     lat DOUBLE PRECISION,
     lon DOUBLE PRECISION,
-    location_type INTEGER
+    location_type TEXT
+);
+
+-- Vehicle Dimension
+CREATE TABLE IF NOT EXISTS dwh.dim_vehicle (
+    id SERIAL PRIMARY KEY,
+    vehicle_id TEXT UNIQUE, -- Natural Key (BKK ID)
+    model TEXT,
+    label TEXT,
+    license_plate TEXT
 );
 
 -- Vehicle Event Fact Table
@@ -145,8 +151,8 @@ CREATE TABLE IF NOT EXISTS dwh.fact_vehicle_event (
     weather_id INTEGER REFERENCES dwh.dim_weather(id),
     route_id TEXT REFERENCES dwh.dim_route(route_id),
     stop_id TEXT REFERENCES dwh.dim_stop(stop_id), -- Nullable if not at a stop
+    vehicle_id INTEGER REFERENCES dwh.dim_vehicle(id),
 
-    vehicle_id TEXT,
     trip_id TEXT,
 
     delay_seconds INTEGER,
@@ -155,8 +161,6 @@ CREATE TABLE IF NOT EXISTS dwh.fact_vehicle_event (
 
     lat DOUBLE PRECISION,
     lon DOUBLE PRECISION,
-    speed DOUBLE PRECISION,
-    bearing INTEGER,
 
     status TEXT
 );
@@ -166,4 +170,4 @@ CREATE INDEX IF NOT EXISTS idx_stg_vehicles_timestamp ON staging.stg_vehicles(ti
 CREATE INDEX IF NOT EXISTS idx_stg_weather_timestamp ON staging.stg_weather(timestamp);
 CREATE INDEX IF NOT EXISTS idx_fact_vehicle_event_time ON dwh.fact_vehicle_event(time_id);
 CREATE INDEX IF NOT EXISTS idx_fact_vehicle_event_route ON dwh.fact_vehicle_event(route_id);
-CREATE INDEX IF NOT EXISTS idx_fact_vehicle_event_vehicle ON dwh.fact_vehicle_event(vehicle_id);
+CREATE INDEX IF NOT EXISTS idx_fact_vehicle_event_vehicle_id ON dwh.fact_vehicle_event(vehicle_id);

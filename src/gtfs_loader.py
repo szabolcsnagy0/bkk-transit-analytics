@@ -133,46 +133,75 @@ class GTFSLoader:
         """Populate DWH dimensions from staging"""
         logger.info("Populating DWH dimensions...")
 
-        with self.engine.connect() as conn:
-            # Dim Route
+        ROUTE_TYPE_MAP = {
+            '0': 'Tram',
+            '1': 'Metro',
+            '2': 'Rail',
+            '3': 'Bus',
+            '4': 'Ferry',
+            '11': 'Trolleybus',
+            '109': 'Suburban Railway'
+        }
+
+        LOCATION_TYPE_MAP = {
+            '0': 'Stop',
+            '1': 'Station',
+            '2': 'Entrance/Exit',
+            '3': 'Generic Node',
+            '4': 'Boarding Area'
+        }
+
+        with self.engine.begin() as conn:
+            # 1. Dim Route
             logger.info("Populating dim_route...")
+            df_routes = pd.read_sql("SELECT DISTINCT route_id, route_short_name, route_type FROM staging.stg_gtfs_routes", conn)
+
+            # Map types
+            df_routes['type'] = df_routes['route_type'].astype(str).map(ROUTE_TYPE_MAP).fillna('Other')
+
+            # Prepare for load
+            df_routes = df_routes[['route_id', 'route_short_name', 'type']].rename(columns={'route_short_name': 'short_name'})
+
+            # Load to temp table
+            conn.execute(text("CREATE TEMP TABLE temp_dim_route (LIKE dwh.dim_route INCLUDING ALL)"))
+            df_routes.to_sql('temp_dim_route', conn, if_exists='append', index=False)
+
+            # Upsert
             conn.execute(text("""
-                INSERT INTO dwh.dim_route (route_id, short_name, long_name, type, color, text_color)
-                SELECT DISTINCT
-                    route_id,
-                    route_short_name,
-                    route_long_name,
-                    CAST(route_type AS INTEGER),
-                    route_color,
-                    route_text_color
-                FROM staging.stg_gtfs_routes
+                INSERT INTO dwh.dim_route (route_id, short_name, type)
+                SELECT route_id, short_name, type FROM temp_dim_route
                 ON CONFLICT (route_id) DO UPDATE
                 SET short_name = EXCLUDED.short_name,
-                    long_name = EXCLUDED.long_name,
-                    type = EXCLUDED.type,
-                    color = EXCLUDED.color,
-                    text_color = EXCLUDED.text_color;
+                    type = EXCLUDED.type;
             """))
+            conn.execute(text("DROP TABLE temp_dim_route"))
 
-            # Dim Stop
+            # 2. Dim Stop
             logger.info("Populating dim_stop...")
+            df_stops = pd.read_sql("SELECT DISTINCT stop_id, stop_name, stop_lat, stop_lon, location_type FROM staging.stg_gtfs_stops", conn)
+
+            # Map location types (handle NaN/None)
+            df_stops['location_type'] = df_stops['location_type'].fillna('0').astype(int).astype(str).map(LOCATION_TYPE_MAP).fillna('Unknown')
+
+            # Prepare for load
+            df_stops = df_stops[['stop_id', 'stop_name', 'stop_lat', 'stop_lon', 'location_type']].rename(columns={'stop_name': 'name', 'stop_lat': 'lat', 'stop_lon': 'lon'})
+
+            # Load to temp table
+            conn.execute(text("CREATE TEMP TABLE temp_dim_stop (LIKE dwh.dim_stop INCLUDING ALL)"))
+            df_stops.to_sql('temp_dim_stop', conn, if_exists='append', index=False)
+
+            # Upsert
             conn.execute(text("""
                 INSERT INTO dwh.dim_stop (stop_id, name, lat, lon, location_type)
-                SELECT DISTINCT
-                    stop_id,
-                    stop_name,
-                    CAST(stop_lat AS DOUBLE PRECISION),
-                    CAST(stop_lon AS DOUBLE PRECISION),
-                    CAST(location_type AS INTEGER)
-                FROM staging.stg_gtfs_stops
+                SELECT stop_id, name, lat, lon, location_type FROM temp_dim_stop
                 ON CONFLICT (stop_id) DO UPDATE
                 SET name = EXCLUDED.name,
                     lat = EXCLUDED.lat,
                     lon = EXCLUDED.lon,
                     location_type = EXCLUDED.location_type;
             """))
+            conn.execute(text("DROP TABLE temp_dim_stop"))
 
-            conn.commit()
             logger.info("Dimensions populated successfully.")
 
     def cleanup(self):
