@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
 Unified Weather Data Collector - Collects historical weather data for BKK transit data
-Supports multiple modes: full collection, recent sync, and continuous operation
 """
 
 import json

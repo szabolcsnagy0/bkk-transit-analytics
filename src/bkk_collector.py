@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-BKK Data Collector - Simple and clean implementation for collecting real-time transit data
+BKK Data Collector - Collecting real-time transit data
 """
 
 import json

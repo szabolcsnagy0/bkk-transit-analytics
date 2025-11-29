@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 BKK Collection Monitor - Check status and statistics of data collection
 """

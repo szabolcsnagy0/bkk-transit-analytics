@@ -54,3 +54,9 @@ retry:
 # Weather API Configuration
 weather_api:
   api_key: "YOUR_OPENWEATHER_API_KEY"  # Replace with your actual API key
+
+# Database Configuration
+database:
+  host: "localhost"
+  port: 5432
+  dbname: "bkk_analytics"
