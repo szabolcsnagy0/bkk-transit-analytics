@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   db:
     image: postgis/postgis:15-3.3
@@ -13,6 +11,11 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./sql:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   metabase:
     image: metabase/metabase:latest
@@ -27,9 +30,60 @@ services:
       MB_DB_PASS: ${POSTGRES_PASSWORD}
       MB_DB_HOST: db
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     volumes:
       - metabase_data:/metabase-data
+
+  prefect-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: bkk_prefect_server
+    command: prefect server start --host 0.0.0.0
+    ports:
+      - "4200:4200"
+    environment:
+      PREFECT_API_DATABASE_CONNECTION_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:4200/api/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  prefect-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: bkk_prefect_worker
+    command: >
+      bash -c "
+        prefect config set PREFECT_API_URL=http://prefect-server:4200/api &&
+        prefect work-pool create default-pool --type process || true &&
+        prefect deploy --all &&
+        prefect worker start --pool default-pool --type process
+      "
+    environment:
+      PREFECT_API_URL: http://prefect-server:4200/api
+      DB_HOST: db
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    depends_on:
+      db:
+        condition: service_healthy
+      prefect-server:
+        condition: service_healthy
+    volumes:
+      - ./data:/app/data
+      - ./config:/app/config
+      - ./logs:/app/logs
+      - ./flows:/app/flows
+      - ./src:/app/src
+      - ./prefect.yaml:/app/prefect.yaml
 
 volumes:
   postgres_data:

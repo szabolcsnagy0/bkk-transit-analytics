@@ -27,7 +27,7 @@ config/config.yaml
 # OS
 .DS_Store
 
-scripts/crontab.txt
-
 # Environment variables
 .env
+
+CLAUDE.md

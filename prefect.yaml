@@ -1,0 +1,50 @@
+name: bkk-transit-analytics
+
+deployments:
+  - name: collect-bkk-weekday-working
+    entrypoint: flows/collect_bkk.py:collect_bkk_flow
+    work_pool:
+      name: default-pool
+    schedule:
+      cron: "*/15 9-16 * * 1-4"
+      timezone: "Europe/Budapest"
+
+  - name: collect-bkk-weekday-offhours
+    entrypoint: flows/collect_bkk.py:collect_bkk_flow
+    work_pool:
+      name: default-pool
+    schedule:
+      cron: "*/5 0-8,17-23 * * 1-4"
+      timezone: "Europe/Budapest"
+
+  - name: collect-bkk-weekend
+    entrypoint: flows/collect_bkk.py:collect_bkk_flow
+    work_pool:
+      name: default-pool
+    schedule:
+      cron: "*/5 * * * 5-7"
+      timezone: "Europe/Budapest"
+
+  - name: collect-weather
+    entrypoint: flows/collect_weather.py:collect_weather_flow
+    work_pool:
+      name: default-pool
+    parameters:
+      days_back: 2
+    schedule:
+      cron: "0 9,21 * * *"
+      timezone: "Europe/Budapest"
+
+  - name: elt-pipeline-daily
+    entrypoint: flows/elt_pipeline.py:elt_pipeline_flow
+    work_pool:
+      name: default-pool
+    schedule:
+      cron: "0 22 * * *"
+      timezone: "Europe/Budapest"
+
+  - name: load-gtfs
+    entrypoint: flows/load_gtfs.py:load_gtfs_flow
+    work_pool:
+      name: default-pool
+    # No schedule - triggered manually via Prefect UI

@@ -227,8 +227,8 @@ class UnifiedWeatherCollector:
             json.dump(output_data, f, ensure_ascii=False, indent=2)
 
     def display_progress(self, current: int, total: int, message: str = ""):
-        """Display progress bar"""
-        if total == 0:
+        """Display progress bar (only in interactive terminals)"""
+        if total == 0 or not sys.stdout.isatty():
             return
 
         percent = (current / total) * 100

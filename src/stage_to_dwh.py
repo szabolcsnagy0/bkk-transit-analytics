@@ -34,7 +34,8 @@ class ETLStageToDWH:
         if not user or not password:
             raise ValueError("Database credentials not found in environment variables")
 
-        self.db_url = f"postgresql://{user}:{password}@{db_conf['host']}:{db_conf['port']}/{db_conf['dbname']}"
+        host = os.getenv('DB_HOST', db_conf['host'])
+        self.db_url = f"postgresql://{user}:{password}@{host}:{db_conf['port']}/{db_conf['dbname']}"
         self.engine = create_engine(self.db_url)
 
     def _load_config(self, config_path):

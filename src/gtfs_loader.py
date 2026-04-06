@@ -35,7 +35,8 @@ class GTFSLoader:
         if not user or not password:
             raise ValueError("Database credentials not found in environment variables (POSTGRES_USER, POSTGRES_PASSWORD)")
 
-        self.db_url = f"postgresql://{user}:{password}@{db_conf['host']}:{db_conf['port']}/{db_conf['dbname']}"
+        host = os.getenv('DB_HOST', db_conf['host'])
+        self.db_url = f"postgresql://{user}:{password}@{host}:{db_conf['port']}/{db_conf['dbname']}"
 
         self.engine = create_engine(self.db_url)
         self.gtfs_dir = Path("data/raw/gtfs")
@@ -204,20 +205,7 @@ class GTFSLoader:
 
             logger.info("Dimensions populated successfully.")
 
-    def cleanup(self):
-        """Remove temp files"""
-        if self.temp_dir.exists():
-            shutil.rmtree(self.temp_dir)
-            logger.info("Cleaned up temp files.")
-
     def run(self):
-        self.load_staging_tables()
-    def cleanup(self):
-        """Cleanup not needed for raw directory"""
-        pass
-
-    def run(self):
-        # Ensure GTFS directory exists
         if not self.gtfs_dir.exists():
             logger.error(f"GTFS directory not found at {self.gtfs_dir}. Please extract GTFS data there.")
             return
