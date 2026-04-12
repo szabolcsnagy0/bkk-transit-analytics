@@ -7,10 +7,14 @@ import json
 import os
 import pandas as pd
 import logging
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from sqlalchemy import create_engine, text
 from dotenv import load_dotenv
 import yaml
+
+BUDAPEST_TZ = ZoneInfo('Europe/Budapest')
 
 # Configure logging
 logging.basicConfig(
@@ -42,6 +46,19 @@ class ETLRawToStage:
         self.bkk_path = self.raw_path / "bkk"
         self.weather_path = self.raw_path / "weather"
 
+    @staticmethod
+    def normalize_timestamp(ts_str):
+        """Convert any timestamp to naive Budapest local time.
+        - TZ-aware (e.g. +02:00) → convert to Budapest, strip tzinfo
+        - TZ-naive → assume Budapest local (backward compatible)
+        """
+        if ts_str is None:
+            return None
+        dt = datetime.fromisoformat(ts_str)
+        if dt.tzinfo is not None:
+            dt = dt.astimezone(BUDAPEST_TZ).replace(tzinfo=None)
+        return dt.isoformat()
+
     def _load_config(self, config_path):
         with open(config_path, 'r') as f:
             return yaml.safe_load(f)
@@ -71,7 +88,7 @@ class ETLRawToStage:
                     content = json.load(f)
 
                 metadata = content.get('metadata', {})
-                timestamp = metadata.get('timestamp')
+                timestamp = self.normalize_timestamp(metadata.get('timestamp'))
 
                 if 'data' in content and 'data' in content['data'] and 'list' in content['data']['data']:
                     vehicles = content['data']['data']['list']
@@ -136,7 +153,7 @@ class ETLRawToStage:
                 if isinstance(rain, dict):
                     rain_val = rain.get('1h', 0)
 
-                ts = metadata.get('timestamp')
+                ts = self.normalize_timestamp(metadata.get('timestamp'))
 
                 weather_row = {
                     'timestamp': ts,

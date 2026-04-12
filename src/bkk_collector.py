@@ -10,7 +10,10 @@ import time
 import os
 import logging
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from pathlib import Path
+
+BUDAPEST_TZ = ZoneInfo('Europe/Budapest')
 import yaml
 from logging.handlers import RotatingFileHandler
 
@@ -64,7 +67,7 @@ class BKKCollector:
 
     def get_current_interval(self):
         """Determine collection interval based on current time"""
-        now = datetime.now()
+        now = datetime.now(BUDAPEST_TZ)
         weekday = now.weekday()  # 0=Monday, 6=Sunday
         hour = now.hour
 
@@ -130,7 +133,7 @@ class BKKCollector:
             self.logger.warning("No data to save (collection failed)")
             return None
 
-        now = datetime.now()
+        now = datetime.now(BUDAPEST_TZ)
         storage_config = self.config['storage']
 
         # Create directory structure: data/raw/bkk/YYYY-MM-DD/
