@@ -188,75 +188,93 @@ class ETLStageToDWH:
     def calculate_delays_and_load_facts(self):
         """
         Core Logic:
-        1. Load Vehicles
-        2. Load GTFS Schedule (Stop Times + Stops)
-        3. Match Vehicle -> Trip -> Stop
-        4. Calculate Delay
-        5. Load to Fact Table
+        1. Stage cleaned vehicles (stripped IDs + feed_id) to a temp table
+        2. SQL-join vehicles × gtfs_feeds × stop_times × stops with a bbox filter
+           — Postgres can use indexes here, far faster than a pandas merge of
+           millions × millions of rows.
+        3. Precise Haversine + delay calc in pandas on the small candidate set.
+        4. Upsert to fact table.
         """
         logger.info("Calculating delays and loading facts...")
 
-        # 1. Load Vehicles
-        # Filter invalid lat/lon and missing identifiers
-        logger.info("Reading vehicles...")
-        vehicles_query = """
-            SELECT vehicle_id, trip_id, route_id, lat, lon, timestamp, status
-            FROM staging.stg_vehicles
-            WHERE lat != 0
-              AND lon != 0
-              AND trip_id IS NOT NULL
-              AND trip_id != ''
-              AND route_id IS NOT NULL
+        # 1. Stage cleaned vehicles to a temp table.
+        # Strip agency prefix from trip_id / route_id (e.g. "BKK_1234" -> "1234").
+        # Fall back to observation date when service_date is missing (legacy rows).
+        logger.info("Staging cleaned vehicles to temp table...")
+        with self.engine.begin() as conn:
+            conn.execute(text("DROP TABLE IF EXISTS tmp_clean_vehicles"))
+            conn.execute(text("""
+                CREATE TEMP TABLE tmp_clean_vehicles AS
+                SELECT
+                    vehicle_id AS vehicle_natural_id,
+                    substring(trip_id FROM position('_' IN trip_id) + 1) AS trip_id,
+                    substring(route_id FROM position('_' IN route_id) + 1) AS route_id,
+                    lat,
+                    lon,
+                    timestamp,
+                    status,
+                    COALESCE(service_date, timestamp::date) AS service_date
+                FROM staging.stg_vehicles
+                WHERE lat != 0 AND lon != 0
+                  AND trip_id IS NOT NULL AND trip_id != ''
+                  AND route_id IS NOT NULL
+            """))
+            conn.execute(text("CREATE INDEX ON tmp_clean_vehicles (service_date, trip_id)"))
+
+            # Warn about vehicles whose service_date falls outside any loaded feed.
+            uncovered = conn.execute(text("""
+                SELECT count(*) FROM tmp_clean_vehicles v
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM staging.gtfs_feeds f
+                    WHERE v.service_date BETWEEN f.feed_start_date AND f.feed_end_date
+                )
+            """)).scalar()
+            if uncovered:
+                logger.warning(
+                    f"{uncovered} vehicle observations have no GTFS feed covering their "
+                    f"service_date and will be skipped."
+                )
+
+        # 2. SQL candidate query: join through the feed whose window covers service_date
+        # (most recent wins on ties), bbox-filter to ~200m around the scheduled stop.
+        # This returns a small dataframe — only vehicles observed near a scheduled stop.
+        logger.info("Finding candidate stop-matches via SQL (bbox filter)...")
+        candidates_query = """
+            WITH vehicle_with_feed AS (
+                SELECT DISTINCT ON (v.ctid)
+                    v.vehicle_natural_id, v.trip_id, v.route_id,
+                    v.lat, v.lon, v.timestamp, v.status, v.service_date,
+                    f.id AS feed_id
+                FROM tmp_clean_vehicles v
+                JOIN staging.gtfs_feeds f
+                  ON v.service_date BETWEEN f.feed_start_date AND f.feed_end_date
+                ORDER BY v.ctid, f.loaded_at DESC
+            )
+            SELECT
+                vf.vehicle_natural_id, vf.trip_id, vf.route_id,
+                vf.lat, vf.lon, vf.timestamp, vf.status, vf.service_date,
+                st.stop_id, st.arrival_time, s.stop_lat, s.stop_lon
+            FROM vehicle_with_feed vf
+            JOIN staging.stg_gtfs_stop_times st
+              ON st.feed_id = vf.feed_id AND st.trip_id = vf.trip_id
+            JOIN staging.stg_gtfs_stops s
+              ON s.feed_id = vf.feed_id AND s.stop_id = st.stop_id
+            WHERE abs(vf.lat - s.stop_lat) < 0.002
+              AND abs(vf.lon - s.stop_lon) < 0.003
         """
-        df_vehicles = pd.read_sql(vehicles_query, self.engine)
-        df_vehicles['timestamp'] = pd.to_datetime(df_vehicles['timestamp'])
-
-        # Clean trip_id and route_id to match GTFS format
-        # Remove agency prefix (e.g. "BKK_", "volan_") by taking everything after the first underscore
-        df_vehicles['trip_id'] = df_vehicles['trip_id'].astype(str).str.split('_', n=1).str[-1]
-        df_vehicles['route_id'] = df_vehicles['route_id'].astype(str).str.split('_', n=1).str[-1]
-
-        if df_vehicles.empty:
-            logger.warning("No vehicle data found after cleaning.")
-            return
-
-        # 2. Load GTFS Schedule
-        # We need: trip_id, stop_id, arrival_time, stop_lat, stop_lon
-        logger.info("Reading GTFS schedule...")
-        gtfs_query = """
-            SELECT st.trip_id, st.stop_id, st.arrival_time, s.stop_lat, s.stop_lon
-            FROM staging.stg_gtfs_stop_times st
-            JOIN staging.stg_gtfs_stops s ON st.stop_id = s.stop_id
-        """
-        df_schedule = pd.read_sql(gtfs_query, self.engine)
-
-        # Optimize types
-        df_schedule['stop_lat'] = df_schedule['stop_lat'].astype(float)
-        df_schedule['stop_lon'] = df_schedule['stop_lon'].astype(float)
-
-        # 3. Merge Vehicles with Schedule on trip_id
-        # This creates a row for every (vehicle_pos, scheduled_stop) pair in the trip
-        logger.info("Merging vehicles with schedule...")
-        merged = pd.merge(df_vehicles, df_schedule, on='trip_id', how='inner')
-
-        # 4. Calculate Distance
-        # Vectorized filter first to reduce heavy calculations
-        # Simple bounding box check
-        merged['lat_diff'] = (merged['lat'] - merged['stop_lat']).abs()
-        merged['lon_diff'] = (merged['lon'] - merged['stop_lon']).abs()
-
-        # Filter candidates roughly within ~100m
-        candidates = merged[
-            (merged['lat_diff'] < 0.002) &
-            (merged['lon_diff'] < 0.003)
-        ].copy()
+        candidates = pd.read_sql(candidates_query, self.engine)
+        logger.info(f"SQL returned {len(candidates)} candidate (vehicle × stop) rows.")
 
         if candidates.empty:
-            logger.warning("No vehicles found near scheduled stops (within ~200m bounding box).")
-            # Debug info
-            if not merged.empty:
-                logger.info(f"Min lat_diff: {merged['lat_diff'].min()}, Min lon_diff: {merged['lon_diff'].min()}")
+            logger.warning("No candidate vehicle-stop pairs found.")
             return
+
+        candidates['timestamp'] = pd.to_datetime(candidates['timestamp'])
+        candidates['service_date'] = pd.to_datetime(candidates['service_date'])
+        candidates['stop_lat'] = candidates['stop_lat'].astype(float)
+        candidates['stop_lon'] = candidates['stop_lon'].astype(float)
+        # Rename to match downstream code expecting 'vehicle_id' as the natural key
+        candidates = candidates.rename(columns={'vehicle_natural_id': 'vehicle_id'})
 
         # Precise distance calculation (Haversine)
         def haversine_np(lon1, lat1, lon2, lat2):
@@ -287,20 +305,21 @@ class ETLStageToDWH:
                 return timedelta(days=1, hours=hours, minutes=parts[1], seconds=parts[2])
             return timedelta(hours=hours, minutes=parts[1], seconds=parts[2])
 
-        arrivals['trip_date'] = arrivals['timestamp'].dt.normalize()
-
-        # Convert arrival_time string to timedelta
+        # Use the trip's service_date (from the BKK API) as the base, NOT the observation date.
+        # For overnight trips the vehicle may be observed on service_date + 1 (after midnight),
+        # and GTFS encodes that with arrival_time >= 24:00:00 relative to service_date.
         arrivals['sched_timedelta'] = arrivals['arrival_time'].apply(parse_gtfs_time)
-
-        arrivals['scheduled_ts'] = arrivals['trip_date'] + arrivals['sched_timedelta']
+        arrivals['scheduled_ts'] = arrivals['service_date'] + arrivals['sched_timedelta']
 
         # Calculate delay in seconds
         arrivals['delay_seconds'] = (arrivals['timestamp'] - arrivals['scheduled_ts']).dt.total_seconds()
 
-        # Deduplicate: A vehicle might be at the stop for multiple minutes.
-        # We want one event per (trip_id, stop_id).
+        # Deduplicate: a vehicle sits near a stop across multiple collection cycles.
+        # Key on scheduled_ts (not just trip_id+stop_id) so that the same trip_id
+        # observed on different service days produces separate events.
+        # Keep the closest observation.
         final_facts = arrivals.sort_values('distance_m').drop_duplicates(
-            subset=['trip_id', 'stop_id']
+            subset=['trip_id', 'stop_id', 'scheduled_ts']
         )
 
         logger.info(f"Identified {len(final_facts)} stop arrival events.")
@@ -367,9 +386,36 @@ class ETLStageToDWH:
             'status': final_facts['status']
         })
 
-        # Insert
-        logger.info("Inserting facts into DWH...")
-        load_df.to_sql('fact_vehicle_event', self.engine, schema='dwh', if_exists='append', index=False)
+        # Upsert via staging table to dedupe on re-runs.
+        # The unique index on (trip_id, stop_id, scheduled_time) makes each real-world
+        # arrival event idempotent regardless of how many times this ETL runs.
+        logger.info(f"Upserting {len(load_df)} facts into DWH...")
+        with self.engine.begin() as conn:
+            conn.execute(text("""
+                CREATE TEMP TABLE temp_fact_vehicle_event
+                (LIKE dwh.fact_vehicle_event INCLUDING DEFAULTS)
+                ON COMMIT DROP
+            """))
+            load_df.to_sql('temp_fact_vehicle_event', conn, if_exists='append', index=False)
+            conn.execute(text("""
+                INSERT INTO dwh.fact_vehicle_event (
+                    time_id, weather_id, route_id, stop_id, vehicle_id,
+                    trip_id, delay_seconds, scheduled_time, actual_time,
+                    lat, lon, status
+                )
+                SELECT time_id, weather_id, route_id, stop_id, vehicle_id,
+                       trip_id, delay_seconds, scheduled_time, actual_time,
+                       lat, lon, status
+                FROM temp_fact_vehicle_event
+                ON CONFLICT (trip_id, stop_id, scheduled_time) DO UPDATE
+                SET delay_seconds = EXCLUDED.delay_seconds,
+                    actual_time   = EXCLUDED.actual_time,
+                    time_id       = EXCLUDED.time_id,
+                    weather_id    = EXCLUDED.weather_id,
+                    lat           = EXCLUDED.lat,
+                    lon           = EXCLUDED.lon,
+                    status        = EXCLUDED.status
+            """))
         logger.info("Done.")
 
     def run(self):

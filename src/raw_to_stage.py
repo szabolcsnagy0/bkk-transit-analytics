@@ -99,7 +99,14 @@ class ETLRawToStage:
                     continue
 
                 for v in vehicles:
-                    # Extract fields matching stg_vehicles schema
+                    # BKK API provides serviceDate as YYYYMMDD — the date the trip's service day
+                    # started, which is what GTFS schedules are keyed on. For overnight trips
+                    # observed after midnight this differs from the observation date.
+                    service_date_raw = v.get('serviceDate')
+                    service_date = None
+                    if service_date_raw and len(service_date_raw) == 8:
+                        service_date = f"{service_date_raw[0:4]}-{service_date_raw[4:6]}-{service_date_raw[6:8]}"
+
                     vehicle_row = {
                         'vehicle_id': v.get('vehicleId'),
                         'trip_id': v.get('tripId'),
@@ -112,7 +119,8 @@ class ETLRawToStage:
                         'label': v.get('label'),
                         'model': v.get('model'),
                         'status': v.get('status'),
-                        'timestamp': timestamp
+                        'timestamp': timestamp,
+                        'service_date': service_date
                     }
                     batch_data.append(vehicle_row)
 
