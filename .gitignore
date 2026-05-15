@@ -29,5 +29,3 @@ config/config.yaml
 
 # Environment variables
 .env
-
-CLAUDE.md
